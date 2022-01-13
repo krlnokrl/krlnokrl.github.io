@@ -1,0 +1,116 @@
+<script src="lib/acorn.js"></script>
+<script src="lib/interpreter.js"></script>
+<script src="lib/serialize.js"></script>
+
+<p>Choose contract file and initialize the code</p>
+<p>Use the file <a href="contract.js">contract.js</a></p>
+<input type="file" id="fileselect" name="fileselect" accept=".js" value="contract.js" />
+
+<button onclick="runContract()">Run</button>
+<br>
+
+
+<p> Operations to be loaded from RPC, parsed and ran in the instance. </p>
+<p>Operations:</p>
+
+<textarea id="operations">
+addElement(1337);
+addElement(42);
+</textarea>
+<button type="button" onclick="runOperations()">run Ops</button>
+
+<p> View only operations that don't alter the instance. </p>
+<p>Views:</p>
+<textarea id="views">
+viewElement(3);
+</textarea>
+<button type="button" onclick="runViews()">run Views</button>
+<p id ="result">Returned value</p>
+
+<script>
+var contractCode = "";
+var myInterpreter;
+// Executes a command inside an interpreter instance in an atomic way
+// If the instance takes longer than the allowed memory or steps, the instance state is reverted.
+// limit mem: 25MB, steps per call: 50k
+function atomic_execution(interpreter, code, steps=50000, memory=25000000) {
+    var state_init = serialize(interpreter);
+    interpreter.appendCode(code);
+    var success = false;
+    for (i = 0; i < steps; i++) {
+        try {
+            //try to step execution
+            var ok = interpreter.step();
+        } finally {
+            if (!ok) {
+                //execution is stopped - code completed
+                break;
+            }
+        }
+        //periodically check for memory bombs
+        if (i % 1500 == 0) {
+            if (JSON.stringify(serialize(interpreter)).length > memory) {
+                break;
+            }
+        }
+    }
+	
+	
+    var l = JSON.stringify(serialize(interpreter)).length;
+    console.log("steps " + i + " memory " + l);
+	//is memory or steps exceeded revert instance
+    if (i == steps || l > memory) {
+        console.log("Failed!");
+        deserialize(state_init, interpreter);
+    }
+}
+
+// executes the command in an atomic way and reverts the state
+// used to viewonly, without altering the contract state.
+function viewonly_execution(interpreter, code){
+	var state_init = serialize(interpreter);
+	
+    atomic_execution(interpreter, code);
+	var result = interpreter.value;
+	
+	deserialize(state_init, interpreter);
+	
+	return result;
+}
+
+function runContract(){
+	myInterpreter = new Interpreter(contractCode);
+	myInterpreter.run();
+	console.log(myInterpreter.value);
+}
+
+function runOperations(){
+	var opsCode = document.getElementById("operations").value;
+	atomic_execution(myInterpreter, opsCode);
+}
+
+function runViews(){
+	var opsCode = document.getElementById("views").value;
+	var result = viewonly_execution(myInterpreter, opsCode);
+	document.getElementById("result").innerHTML = result;
+}
+
+
+
+</script>
+
+<script>
+
+//loads contract from file
+function readImage(evt) {
+	var file = evt.target.files[0];
+  const reader = new FileReader();
+  reader.addEventListener('load', (event) => {
+    contractCode = event.target.result;
+  });
+  reader.readAsText(file);
+}
+
+ document.getElementById('fileselect').addEventListener('change', readImage, false);
+</script>
+
